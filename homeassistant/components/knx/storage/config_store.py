@@ -14,13 +14,17 @@ from homeassistant.util.ulid import ulid_now
 from ..const import DOMAIN, KNX_MODULE_KEY
 from . import migration
 from .const import CONF_DATA
+from .entity_bridge_controller import (
+    KNXEntityBridgeStoreConfigModel,
+    KNXEntityBridgeStoreModel,
+)
 from .expose_controller import KNXExposeStoreConfigModel, KNXExposeStoreModel
 from .time_server import KNXTimeServerStoreModel
 
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION: Final = 2
-STORAGE_VERSION_MINOR: Final = 4
+STORAGE_VERSION_MINOR: Final = 5
 STORAGE_KEY: Final = f"{DOMAIN}/config_store.json"
 
 type KNXPlatformStoreModel = dict[str, dict[str, Any]]  # unique_id: configuration
@@ -35,6 +39,7 @@ class KNXConfigStoreModel(TypedDict):
     entities: KNXEntityStoreModel
     expose: KNXExposeStoreModel
     time_server: KNXTimeServerStoreModel
+    entity_bridge: KNXEntityBridgeStoreModel
 
 
 class PlatformControllerBase(ABC):
@@ -75,6 +80,10 @@ class _KNXConfigStoreStorage(Store[KNXConfigStoreModel]):
             # version 2.4 introduced in 2026.5
             migration.migrate_2_3_to_2_4(old_data)
 
+        if old_major_version <= 2 and old_minor_version < 5:
+            # version 2.5 introduced in 2026.8
+            migration.migrate_2_4_to_2_5(old_data)
+
         return old_data
 
 
@@ -96,6 +105,7 @@ class KNXConfigStore:
             entities={},
             expose={},
             time_server={},
+            entity_bridge={},
         )
         self._platform_controllers: dict[Platform, PlatformControllerBase] = {}
 
@@ -242,6 +252,61 @@ class KNXConfigStore:
                 f"Entity not found in expose configuration: {entity_id}"
             ) from err
         await self._store.async_save(self.data)
+
+    @callback
+    def get_entity_bridges(self) -> KNXEntityBridgeStoreModel:
+        """Return all KNX entity bridge configurations."""
+        return self.data["entity_bridge"]
+
+    @callback
+    def get_entity_bridge_config(
+        self, unique_id: str
+    ) -> KNXEntityBridgeStoreConfigModel:
+        """Return the configuration of a single KNX entity bridge."""
+        try:
+            return self.data["entity_bridge"][unique_id]
+        except KeyError as err:
+            raise ConfigStoreException(f"Entity bridge not found: {unique_id}") from err
+
+    async def create_entity_bridge(
+        self, config: KNXEntityBridgeStoreConfigModel
+    ) -> str:
+        """Create a new KNX entity bridge and return its unique_id."""
+        unique_id = f"knx_eb_{ulid_now()}"
+        self._start_entity_bridge(unique_id, config)
+        self.data["entity_bridge"][unique_id] = config
+        await self._store.async_save(self.data)
+        return unique_id
+
+    async def update_entity_bridge(
+        self, unique_id: str, config: KNXEntityBridgeStoreConfigModel
+    ) -> None:
+        """Update an existing KNX entity bridge."""
+        if unique_id not in self.data["entity_bridge"]:
+            raise ConfigStoreException(f"Entity bridge not found: {unique_id}")
+        self._start_entity_bridge(unique_id, config)
+        self.data["entity_bridge"][unique_id] = config
+        await self._store.async_save(self.data)
+
+    async def delete_entity_bridge(self, unique_id: str) -> None:
+        """Delete a KNX entity bridge."""
+        knx_module = self.hass.data[KNX_MODULE_KEY]
+        knx_module.ui_entity_bridge_controller.remove_bridge(unique_id)
+        try:
+            del self.data["entity_bridge"][unique_id]
+        except KeyError as err:
+            raise ConfigStoreException(f"Entity bridge not found: {unique_id}") from err
+        await self._store.async_save(self.data)
+
+    @callback
+    def _start_entity_bridge(
+        self, unique_id: str, config: KNXEntityBridgeStoreConfigModel
+    ) -> None:
+        """Create/replace the runtime bridge before persisting its config."""
+        knx_module = self.hass.data[KNX_MODULE_KEY]
+        knx_module.ui_entity_bridge_controller.update_bridge(
+            self.hass, knx_module.xknx, unique_id, config
+        )
 
     @callback
     def get_time_server_config(self) -> KNXTimeServerStoreModel:

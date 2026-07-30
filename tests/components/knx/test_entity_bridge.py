@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from homeassistant.components.climate import SERVICE_SET_TEMPERATURE
 from homeassistant.const import (
     SERVICE_CLOSE_COVER,
     SERVICE_OPEN_COVER,
@@ -264,3 +265,38 @@ async def test_cover_bridge(
     hass.states.async_set("cover.test", "open", {"current_position": 100})
     await hass.async_block_till_done()
     await knx.assert_write(_STATUS_GA, (0,))
+
+
+# DPT 9.001 encoding of 21.0 degrees
+_TEMP_21 = (0x0C, 0x1A)
+
+
+async def test_climate_bridge(
+    hass: HomeAssistant,
+    knx: KNXTestKit,
+    hass_ws_client: WebSocketGenerator,
+) -> None:
+    """Test climate current (read-only) and target temperature channels."""
+    await knx.setup_integration()
+    ws_client = await hass_ws_client(hass)
+    await _create_bridge(
+        ws_client,
+        "climate",
+        "climate.test",
+        {
+            "current_temperature": {"write": "1/0/1"},
+            "target_temperature": {"write": _STATUS_GA, "state": _COMMAND_GA},
+        },
+    )
+    set_temperature = async_mock_service(hass, "climate", SERVICE_SET_TEMPERATURE)
+
+    # inbound target temperature -> climate.set_temperature
+    await knx.receive_write(_COMMAND_GA, _TEMP_21)
+    await hass.async_block_till_done()
+    assert len(set_temperature) == 1
+    assert set_temperature[0].data == {"entity_id": "climate.test", "temperature": 21.0}
+
+    # outbound current temperature -> status group address
+    hass.states.async_set("climate.test", "heat", {"current_temperature": 21.0})
+    await hass.async_block_till_done()
+    await knx.assert_write("1/0/1", _TEMP_21)

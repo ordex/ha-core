@@ -11,12 +11,22 @@ from dataclasses import dataclass
 from typing import Any
 
 from xknx import XKNX
-from xknx.remote_value import RemoteValue, RemoteValueScaling, RemoteValueSwitch
+from xknx.remote_value import (
+    RemoteValue,
+    RemoteValueScaling,
+    RemoteValueSwitch,
+    RemoteValueTemp,
+)
 
+from homeassistant.components.climate import (
+    ATTR_CURRENT_TEMPERATURE,
+    SERVICE_SET_TEMPERATURE,
+)
 from homeassistant.components.cover import ATTR_CURRENT_POSITION, ATTR_POSITION
 from homeassistant.components.light import ATTR_BRIGHTNESS
 from homeassistant.const import (
     ATTR_ENTITY_ID,
+    ATTR_TEMPERATURE,
     SERVICE_CLOSE_COVER,
     SERVICE_OPEN_COVER,
     SERVICE_SET_COVER_POSITION,
@@ -179,6 +189,33 @@ def _cover_position_service_call(entity_id: str, value: int) -> BridgeServiceCal
     )
 
 
+def _temp_remote_value(
+    xknx: XKNX, status_ga: str | None, command_gas: list[str]
+) -> RemoteValueTemp:
+    return RemoteValueTemp(
+        xknx,
+        group_address=status_ga,
+        group_address_state=command_gas or None,
+        sync_state=False,
+    )
+
+
+def _current_temp_read_state(state: State) -> float | None:
+    return state.attributes.get(ATTR_CURRENT_TEMPERATURE)
+
+
+def _target_temp_read_state(state: State) -> float | None:
+    return state.attributes.get(ATTR_TEMPERATURE)
+
+
+def _target_temp_service_call(entity_id: str, value: float) -> BridgeServiceCall:
+    return BridgeServiceCall(
+        domain=Platform.CLIMATE,
+        service=SERVICE_SET_TEMPERATURE,
+        data={ATTR_ENTITY_ID: entity_id, ATTR_TEMPERATURE: value},
+    )
+
+
 CHANNELS: dict[Platform, dict[str, ChannelDefinition]] = {
     Platform.SWITCH: {
         "switch": ChannelDefinition(
@@ -221,6 +258,18 @@ CHANNELS: dict[Platform, dict[str, ChannelDefinition]] = {
             remote_value_factory=_cover_position_remote_value,
             read_state=_cover_position_read_state,
             to_service_call=_cover_position_service_call,
+        ),
+    },
+    Platform.CLIMATE: {
+        "current_temperature": ChannelDefinition(
+            remote_value_factory=_temp_remote_value,
+            read_state=_current_temp_read_state,
+            to_service_call=_no_service_call,
+        ),
+        "target_temperature": ChannelDefinition(
+            remote_value_factory=_temp_remote_value,
+            read_state=_target_temp_read_state,
+            to_service_call=_target_temp_service_call,
         ),
     },
 }

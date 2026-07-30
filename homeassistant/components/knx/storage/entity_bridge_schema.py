@@ -47,11 +47,22 @@ COVER_BRIDGE_SCHEMA = vol.Schema(
     }
 )
 
+# current_temperature is read-only (status); target_temperature is bidirectional.
+CLIMATE_BRIDGE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("current_temperature"): GASelector(
+            state=False, passive=False, write_required=True, valid_dpt="9.001"
+        ),
+        vol.Optional("target_temperature"): GASelector(valid_dpt="9.001"),
+    }
+)
+
 BRIDGE_SCHEMA_FOR_PLATFORM: dict[Platform, VolSchemaType] = {
     Platform.SWITCH: SWITCH_BRIDGE_SCHEMA,
     Platform.LIGHT: LIGHT_BRIDGE_SCHEMA,
     Platform.BINARY_SENSOR: BINARY_SENSOR_BRIDGE_SCHEMA,
     Platform.COVER: COVER_BRIDGE_SCHEMA,
+    Platform.CLIMATE: CLIMATE_BRIDGE_SCHEMA,
 }
 
 

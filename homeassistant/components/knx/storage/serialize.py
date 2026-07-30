@@ -8,6 +8,7 @@ from voluptuous_serialize import UNSUPPORTED, UnsupportedType, convert
 from homeassistant.const import Platform
 from homeassistant.helpers import selector
 
+from .entity_bridge_schema import BRIDGE_SCHEMA_FOR_PLATFORM
 from .entity_store_schema import KNX_SCHEMA_FOR_PLATFORM
 from .knx_selector import AllSerializeFirst, GroupSelectSchema, KNXSelectorBase
 
@@ -44,4 +45,13 @@ def get_serialized_schema(
     """Get the schema for a specific platform."""
     if knx_schema := KNX_SCHEMA_FOR_PLATFORM.get(platform):
         return convert(knx_schema, custom_serializer=knx_serializer)
+    return None
+
+
+def get_serialized_bridge_schema(
+    platform: Platform,
+) -> dict[str, Any] | list[dict[str, Any]] | None:
+    """Get the entity bridge schema for a specific platform."""
+    if bridge_schema := BRIDGE_SCHEMA_FOR_PLATFORM.get(platform):
+        return convert(bridge_schema, custom_serializer=knx_serializer)
     return None

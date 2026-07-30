@@ -69,8 +69,7 @@ class KnxEntityBridge:
 
         definitions = CHANNELS[platform]
         self._channels: list[_Channel] = []
-        for role, channel_config in channels_config.items():
-            ga = channel_config["ga"]
+        for role, ga in channels_config.items():
             status_ga = ga.get("write")
             command_gas = [a for a in [ga.get("state"), *ga.get("passive", [])] if a]
             remote_value = definitions[role].remote_value_factory(

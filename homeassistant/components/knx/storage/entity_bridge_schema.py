@@ -38,10 +38,20 @@ BINARY_SENSOR_BRIDGE_SCHEMA = vol.Schema(
     }
 )
 
+# up_down and stop are command-only (no status feedback); position is bidirectional.
+COVER_BRIDGE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("up_down"): GASelector(write=False, valid_dpt="1.008"),
+        vol.Optional("stop"): GASelector(write=False, valid_dpt="1.010"),
+        vol.Optional("position"): GASelector(valid_dpt="5.001"),
+    }
+)
+
 BRIDGE_SCHEMA_FOR_PLATFORM: dict[Platform, VolSchemaType] = {
     Platform.SWITCH: SWITCH_BRIDGE_SCHEMA,
     Platform.LIGHT: LIGHT_BRIDGE_SCHEMA,
     Platform.BINARY_SENSOR: BINARY_SENSOR_BRIDGE_SCHEMA,
+    Platform.COVER: COVER_BRIDGE_SCHEMA,
 }
 
 

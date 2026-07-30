@@ -13,9 +13,14 @@ from typing import Any
 from xknx import XKNX
 from xknx.remote_value import RemoteValue, RemoteValueScaling, RemoteValueSwitch
 
+from homeassistant.components.cover import ATTR_CURRENT_POSITION, ATTR_POSITION
 from homeassistant.components.light import ATTR_BRIGHTNESS
 from homeassistant.const import (
     ATTR_ENTITY_ID,
+    SERVICE_CLOSE_COVER,
+    SERVICE_OPEN_COVER,
+    SERVICE_SET_COVER_POSITION,
+    SERVICE_STOP_COVER,
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
     STATE_OFF,
@@ -79,6 +84,11 @@ def _no_service_call(entity_id: str, value: object) -> None:
     return
 
 
+def _no_read_state(state: State) -> None:
+    """Command-only channel: nothing to send to the bus."""
+    return
+
+
 def _light_switch_remote_value(
     xknx: XKNX, status_ga: str | None, command_gas: list[str]
 ) -> RemoteValueSwitch:
@@ -124,6 +134,51 @@ def _brightness_service_call(entity_id: str, value: int) -> BridgeServiceCall:
     )
 
 
+def _cover_updown_service_call(entity_id: str, value: bool) -> BridgeServiceCall:
+    # DPT 1.008 UpDown: 0 = up (open), 1 = down (close)
+    return BridgeServiceCall(
+        domain=Platform.COVER,
+        service=SERVICE_CLOSE_COVER if value else SERVICE_OPEN_COVER,
+        data={ATTR_ENTITY_ID: entity_id},
+    )
+
+
+def _cover_stop_service_call(entity_id: str, value: bool) -> BridgeServiceCall | None:
+    if not value:
+        return None
+    return BridgeServiceCall(
+        domain=Platform.COVER,
+        service=SERVICE_STOP_COVER,
+        data={ATTR_ENTITY_ID: entity_id},
+    )
+
+
+def _cover_position_remote_value(
+    xknx: XKNX, status_ga: str | None, command_gas: list[str]
+) -> RemoteValueScaling:
+    # KNX 0% = open maps to Home Assistant position 100 (open)
+    return RemoteValueScaling(
+        xknx,
+        group_address=status_ga,
+        group_address_state=command_gas or None,
+        sync_state=False,
+        range_from=100,
+        range_to=0,
+    )
+
+
+def _cover_position_read_state(state: State) -> int | None:
+    return state.attributes.get(ATTR_CURRENT_POSITION)
+
+
+def _cover_position_service_call(entity_id: str, value: int) -> BridgeServiceCall:
+    return BridgeServiceCall(
+        domain=Platform.COVER,
+        service=SERVICE_SET_COVER_POSITION,
+        data={ATTR_ENTITY_ID: entity_id, ATTR_POSITION: value},
+    )
+
+
 CHANNELS: dict[Platform, dict[str, ChannelDefinition]] = {
     Platform.SWITCH: {
         "switch": ChannelDefinition(
@@ -149,6 +204,23 @@ CHANNELS: dict[Platform, dict[str, ChannelDefinition]] = {
             remote_value_factory=_switch_remote_value,
             read_state=_switch_read_state,
             to_service_call=_no_service_call,
+        ),
+    },
+    Platform.COVER: {
+        "up_down": ChannelDefinition(
+            remote_value_factory=_switch_remote_value,
+            read_state=_no_read_state,
+            to_service_call=_cover_updown_service_call,
+        ),
+        "stop": ChannelDefinition(
+            remote_value_factory=_switch_remote_value,
+            read_state=_no_read_state,
+            to_service_call=_cover_stop_service_call,
+        ),
+        "position": ChannelDefinition(
+            remote_value_factory=_cover_position_remote_value,
+            read_state=_cover_position_read_state,
+            to_service_call=_cover_position_service_call,
         ),
     },
 }

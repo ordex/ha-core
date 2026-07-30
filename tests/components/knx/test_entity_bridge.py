@@ -2,7 +2,16 @@
 
 from typing import Any
 
-from homeassistant.const import SERVICE_TURN_OFF, SERVICE_TURN_ON, STATE_OFF, STATE_ON
+from homeassistant.const import (
+    SERVICE_CLOSE_COVER,
+    SERVICE_OPEN_COVER,
+    SERVICE_SET_COVER_POSITION,
+    SERVICE_STOP_COVER,
+    SERVICE_TURN_OFF,
+    SERVICE_TURN_ON,
+    STATE_OFF,
+    STATE_ON,
+)
 from homeassistant.core import HomeAssistant
 
 from .conftest import KNXTestKit
@@ -204,3 +213,54 @@ async def test_binary_sensor_bridge_outbound(
     hass.states.async_set("binary_sensor.test", STATE_OFF)
     await hass.async_block_till_done()
     await knx.assert_write(_STATUS_GA, False)
+
+
+async def test_cover_bridge(
+    hass: HomeAssistant,
+    knx: KNXTestKit,
+    hass_ws_client: WebSocketGenerator,
+) -> None:
+    """Test cover up/down, stop and (inverted) position channels."""
+    await knx.setup_integration()
+    ws_client = await hass_ws_client(hass)
+    await _create_bridge(
+        ws_client,
+        "cover",
+        "cover.test",
+        {
+            "up_down": {"state": "1/0/1"},
+            "stop": {"state": "1/0/2"},
+            "position": {"write": _STATUS_GA, "state": "1/0/3"},
+        },
+    )
+    open_cover = async_mock_service(hass, "cover", SERVICE_OPEN_COVER)
+    close_cover = async_mock_service(hass, "cover", SERVICE_CLOSE_COVER)
+    stop_cover = async_mock_service(hass, "cover", SERVICE_STOP_COVER)
+    set_position = async_mock_service(hass, "cover", SERVICE_SET_COVER_POSITION)
+
+    # DPT 1.008: 0 -> up (open), 1 -> down (close)
+    await knx.receive_write("1/0/1", False)
+    await hass.async_block_till_done()
+    assert len(open_cover) == 1
+    await knx.receive_write("1/0/1", True)
+    await hass.async_block_till_done()
+    assert len(close_cover) == 1
+
+    # stop only on a set bit
+    await knx.receive_write("1/0/2", True)
+    await hass.async_block_till_done()
+    assert len(stop_cover) == 1
+    await knx.receive_write("1/0/2", False)
+    await hass.async_block_till_done()
+    assert len(stop_cover) == 1
+
+    # inbound position: KNX 100% (raw 255) -> HA position 0 (closed)
+    await knx.receive_write("1/0/3", (255,))
+    await hass.async_block_till_done()
+    assert len(set_position) == 1
+    assert set_position[0].data == {"entity_id": "cover.test", "position": 0}
+
+    # outbound position: HA position 100 (open) -> KNX 0% (raw 0)
+    hass.states.async_set("cover.test", "open", {"current_position": 100})
+    await hass.async_block_till_done()
+    await knx.assert_write(_STATUS_GA, (0,))

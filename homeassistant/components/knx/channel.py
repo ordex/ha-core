@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from xknx import XKNX
-from xknx.remote_value import RemoteValue, RemoteValueSwitch
+from xknx.remote_value import RemoteValue, RemoteValueScaling, RemoteValueSwitch
 
+from homeassistant.components.light import ATTR_BRIGHTNESS
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     SERVICE_TURN_OFF,
@@ -73,12 +74,69 @@ def _switch_service_call(entity_id: str, value: bool) -> BridgeServiceCall:
     )
 
 
+def _light_switch_remote_value(
+    xknx: XKNX, status_ga: str | None, command_gas: list[str]
+) -> RemoteValueSwitch:
+    return RemoteValueSwitch(
+        xknx,
+        group_address=status_ga,
+        group_address_state=command_gas or None,
+        sync_state=False,
+    )
+
+
+def _light_switch_service_call(entity_id: str, value: bool) -> BridgeServiceCall:
+    return BridgeServiceCall(
+        domain=Platform.LIGHT,
+        service=SERVICE_TURN_ON if value else SERVICE_TURN_OFF,
+        data={ATTR_ENTITY_ID: entity_id},
+    )
+
+
+def _brightness_remote_value(
+    xknx: XKNX, status_ga: str | None, command_gas: list[str]
+) -> RemoteValueScaling:
+    # HA brightness (0-255) maps 1:1 to the DPT 5.001 raw byte
+    return RemoteValueScaling(
+        xknx,
+        group_address=status_ga,
+        group_address_state=command_gas or None,
+        sync_state=False,
+        range_from=0,
+        range_to=255,
+    )
+
+
+def _brightness_read_state(state: State) -> int | None:
+    return state.attributes.get(ATTR_BRIGHTNESS)
+
+
+def _brightness_service_call(entity_id: str, value: int) -> BridgeServiceCall:
+    return BridgeServiceCall(
+        domain=Platform.LIGHT,
+        service=SERVICE_TURN_ON,
+        data={ATTR_ENTITY_ID: entity_id, ATTR_BRIGHTNESS: value},
+    )
+
+
 CHANNELS: dict[Platform, dict[str, ChannelDefinition]] = {
     Platform.SWITCH: {
         "switch": ChannelDefinition(
             remote_value_factory=_switch_remote_value,
             read_state=_switch_read_state,
             to_service_call=_switch_service_call,
+        ),
+    },
+    Platform.LIGHT: {
+        "switch": ChannelDefinition(
+            remote_value_factory=_light_switch_remote_value,
+            read_state=_switch_read_state,
+            to_service_call=_light_switch_service_call,
+        ),
+        "brightness": ChannelDefinition(
+            remote_value_factory=_brightness_remote_value,
+            read_state=_brightness_read_state,
+            to_service_call=_brightness_service_call,
         ),
     },
 }

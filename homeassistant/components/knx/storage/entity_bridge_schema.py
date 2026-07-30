@@ -22,8 +22,16 @@ SWITCH_BRIDGE_SCHEMA = vol.Schema(
     }
 )
 
+LIGHT_BRIDGE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("switch"): GASelector(valid_dpt="1.001"),
+        vol.Optional("brightness"): GASelector(valid_dpt="5.001"),
+    }
+)
+
 BRIDGE_SCHEMA_FOR_PLATFORM: dict[Platform, VolSchemaType] = {
     Platform.SWITCH: SWITCH_BRIDGE_SCHEMA,
+    Platform.LIGHT: LIGHT_BRIDGE_SCHEMA,
 }
 
 

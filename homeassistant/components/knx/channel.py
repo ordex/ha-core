@@ -74,6 +74,11 @@ def _switch_service_call(entity_id: str, value: bool) -> BridgeServiceCall:
     )
 
 
+def _no_service_call(entity_id: str, value: object) -> None:
+    """Read-only channel: never driven from the bus."""
+    return
+
+
 def _light_switch_remote_value(
     xknx: XKNX, status_ga: str | None, command_gas: list[str]
 ) -> RemoteValueSwitch:
@@ -137,6 +142,13 @@ CHANNELS: dict[Platform, dict[str, ChannelDefinition]] = {
             remote_value_factory=_brightness_remote_value,
             read_state=_brightness_read_state,
             to_service_call=_brightness_service_call,
+        ),
+    },
+    Platform.BINARY_SENSOR: {
+        "state": ChannelDefinition(
+            remote_value_factory=_switch_remote_value,
+            read_state=_switch_read_state,
+            to_service_call=_no_service_call,
         ),
     },
 }

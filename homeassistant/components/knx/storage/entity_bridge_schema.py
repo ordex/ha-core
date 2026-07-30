@@ -29,9 +29,19 @@ LIGHT_BRIDGE_SCHEMA = vol.Schema(
     }
 )
 
+# Read-only platform: only a status group address (no command listening).
+BINARY_SENSOR_BRIDGE_SCHEMA = vol.Schema(
+    {
+        vol.Required("state"): GASelector(
+            state=False, passive=False, write_required=True, valid_dpt="1.001"
+        ),
+    }
+)
+
 BRIDGE_SCHEMA_FOR_PLATFORM: dict[Platform, VolSchemaType] = {
     Platform.SWITCH: SWITCH_BRIDGE_SCHEMA,
     Platform.LIGHT: LIGHT_BRIDGE_SCHEMA,
+    Platform.BINARY_SENSOR: BINARY_SENSOR_BRIDGE_SCHEMA,
 }
 
 

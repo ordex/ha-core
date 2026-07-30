@@ -180,3 +180,27 @@ async def test_light_bridge_switch(
     await knx.receive_write(_COMMAND_GA, False)
     await hass.async_block_till_done()
     assert len(turn_off) == 1
+
+
+async def test_binary_sensor_bridge_outbound(
+    hass: HomeAssistant,
+    knx: KNXTestKit,
+    hass_ws_client: WebSocketGenerator,
+) -> None:
+    """Test a read-only binary_sensor bridge sends state to KNX."""
+    await knx.setup_integration()
+    ws_client = await hass_ws_client(hass)
+    await _create_bridge(
+        ws_client,
+        "binary_sensor",
+        "binary_sensor.test",
+        {"state": {"write": _STATUS_GA}},
+    )
+
+    hass.states.async_set("binary_sensor.test", STATE_ON)
+    await hass.async_block_till_done()
+    await knx.assert_write(_STATUS_GA, True)
+
+    hass.states.async_set("binary_sensor.test", STATE_OFF)
+    await hass.async_block_till_done()
+    await knx.assert_write(_STATUS_GA, False)

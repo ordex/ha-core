@@ -40,6 +40,7 @@ from .const import (
 from .dpt import get_supported_dpts
 from .storage.config_store import ConfigStoreException
 from .storage.const import CONF_DATA
+from .storage.entity_bridge_schema import CONF_CHANNELS, validate_entity_bridge_data
 from .storage.entity_store_schema import (
     CREATE_ENTITY_BASE_SCHEMA,
     UPDATE_ENTITY_BASE_SCHEMA,
@@ -50,7 +51,7 @@ from .storage.entity_store_validation import (
     validate_entity_data,
 )
 from .storage.expose_controller import validate_expose_data
-from .storage.serialize import get_serialized_schema
+from .storage.serialize import get_serialized_bridge_schema, get_serialized_schema
 from .storage.time_server import validate_time_server_data
 from .telegrams import TelegramDict
 
@@ -85,6 +86,13 @@ async def register_panel(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_update_expose)
     websocket_api.async_register_command(hass, ws_delete_expose)
     websocket_api.async_register_command(hass, ws_validate_expose)
+    websocket_api.async_register_command(hass, ws_get_entity_bridge_schema)
+    websocket_api.async_register_command(hass, ws_get_entity_bridges)
+    websocket_api.async_register_command(hass, ws_get_entity_bridge_config)
+    websocket_api.async_register_command(hass, ws_validate_entity_bridge)
+    websocket_api.async_register_command(hass, ws_create_entity_bridge)
+    websocket_api.async_register_command(hass, ws_update_entity_bridge)
+    websocket_api.async_register_command(hass, ws_delete_entity_bridge)
 
     if not async_panel_exists(hass, DOMAIN):
         await hass.http.async_register_static_paths(
@@ -844,6 +852,194 @@ def ws_validate_expose(
     connection.send_result(
         msg["id"], EntityStoreValidationSuccess(success=True, entity_id=None)
     )
+
+
+_ENTITY_BRIDGE_DATA_SCHEMA = {
+    vol.Required(CONF_PLATFORM): str,
+    vol.Required(CONF_ENTITY_ID): str,
+    vol.Required(CONF_CHANNELS): dict,  # validation done in handler
+}
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "knx/get_entity_bridge_schema",
+        vol.Required(CONF_PLATFORM): vol.Coerce(Platform),
+    }
+)
+@websocket_api.async_response
+async def ws_get_entity_bridge_schema(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Provide the serialized entity bridge schema for a platform."""
+    if schema := get_serialized_bridge_schema(msg[CONF_PLATFORM]):
+        connection.send_result(msg["id"], schema)
+        return
+    connection.send_error(
+        msg["id"], websocket_api.const.ERR_HOME_ASSISTANT_ERROR, "Unknown platform"
+    )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "knx/get_entity_bridges",
+    }
+)
+@provide_knx
+@callback
+def ws_get_entity_bridges(
+    hass: HomeAssistant,
+    knx: KNXModule,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Get all entity bridges from config store."""
+    connection.send_result(msg["id"], knx.config_store.get_entity_bridges())
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "knx/get_entity_bridge_config",
+        vol.Required("unique_id"): str,
+    }
+)
+@provide_knx
+@callback
+def ws_get_entity_bridge_config(
+    hass: HomeAssistant,
+    knx: KNXModule,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Get a single entity bridge configuration from config store."""
+    try:
+        config = knx.config_store.get_entity_bridge_config(msg["unique_id"])
+    except ConfigStoreException as err:
+        connection.send_error(
+            msg["id"], websocket_api.const.ERR_HOME_ASSISTANT_ERROR, str(err)
+        )
+        return
+    connection.send_result(msg["id"], config)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "knx/validate_entity_bridge",
+        **_ENTITY_BRIDGE_DATA_SCHEMA,
+    }
+)
+@callback
+def ws_validate_entity_bridge(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Validate entity bridge data."""
+    try:
+        validate_entity_bridge_data(msg)
+    except EntityStoreValidationException as exc:
+        connection.send_result(msg["id"], exc.validation_error)
+        return
+    connection.send_result(
+        msg["id"], EntityStoreValidationSuccess(success=True, entity_id=None)
+    )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "knx/create_entity_bridge",
+        **_ENTITY_BRIDGE_DATA_SCHEMA,
+    }
+)
+@websocket_api.async_response
+@provide_knx
+async def ws_create_entity_bridge(
+    hass: HomeAssistant,
+    knx: KNXModule,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Create an entity bridge in config store and load it."""
+    try:
+        validated_data = validate_entity_bridge_data(msg)
+    except EntityStoreValidationException as exc:
+        connection.send_result(msg["id"], exc.validation_error)
+        return
+    try:
+        unique_id = await knx.config_store.create_entity_bridge(validated_data)
+    except ConfigStoreException as err:
+        connection.send_error(
+            msg["id"], websocket_api.const.ERR_HOME_ASSISTANT_ERROR, str(err)
+        )
+        return
+    connection.send_result(msg["id"], {"success": True, "unique_id": unique_id})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "knx/update_entity_bridge",
+        vol.Required("unique_id"): str,
+        **_ENTITY_BRIDGE_DATA_SCHEMA,
+    }
+)
+@websocket_api.async_response
+@provide_knx
+async def ws_update_entity_bridge(
+    hass: HomeAssistant,
+    knx: KNXModule,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Update an entity bridge in config store."""
+    try:
+        validated_data = validate_entity_bridge_data(msg)
+    except EntityStoreValidationException as exc:
+        connection.send_result(msg["id"], exc.validation_error)
+        return
+    try:
+        await knx.config_store.update_entity_bridge(msg["unique_id"], validated_data)
+    except ConfigStoreException as err:
+        connection.send_error(
+            msg["id"], websocket_api.const.ERR_HOME_ASSISTANT_ERROR, str(err)
+        )
+        return
+    connection.send_result(
+        msg["id"], EntityStoreValidationSuccess(success=True, entity_id=None)
+    )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "knx/delete_entity_bridge",
+        vol.Required("unique_id"): str,
+    }
+)
+@websocket_api.async_response
+@provide_knx
+async def ws_delete_entity_bridge(
+    hass: HomeAssistant,
+    knx: KNXModule,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Delete an entity bridge from config store."""
+    try:
+        await knx.config_store.delete_entity_bridge(msg["unique_id"])
+    except ConfigStoreException as err:
+        connection.send_error(
+            msg["id"], websocket_api.const.ERR_HOME_ASSISTANT_ERROR, str(err)
+        )
+        return
+    connection.send_result(msg["id"])
 
 
 #############

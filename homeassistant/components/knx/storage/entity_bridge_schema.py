@@ -47,7 +47,7 @@ ENTITY_BRIDGE_DATA_SCHEMA: VolSchemaType = vol.All(
             vol.Required(CONF_ENTITY_ID): cv.entity_id,
             vol.Required(CONF_CHANNELS): dict,
         },
-        extra=vol.ALLOW_EXTRA,
+        extra=vol.REMOVE_EXTRA,
     ),
     cv.key_value_schemas(
         CONF_PLATFORM,
